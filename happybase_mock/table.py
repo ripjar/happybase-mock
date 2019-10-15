@@ -11,6 +11,7 @@ def _check_table_existence(method):
         if not table._exists():
             raise IOError('TableNotFoundException: %s' % table.name)
         return method(table, *args, **kwargs)
+
     return wrap
 
 
@@ -27,7 +28,6 @@ def _str_increment(s):
 
 
 class Table(object):
-
     def __init__(self, name, connection):
         self.name = name
         self.connection = connection
@@ -96,24 +96,24 @@ class Table(object):
         return result
 
     @_check_table_existence
-    def rows(self, rows, columns=None, timestamp=None,
-             include_timestamp=False):
+    def rows(self, rows, columns=None, timestamp=None, include_timestamp=False):
         result = []
         for row in rows:
+            if not isinstance(row, bytes):
+                row = row.encode('utf-8')
             data = self.row(row, columns, timestamp, include_timestamp)
-            result.append((row, data))
+            if data:
+                result.append((row, data))
         return result
 
     @_check_table_existence
-    def cells(self, row, column, versions=None, timestamp=None,
-              include_timestamp=False):
+    def cells(self, row, column, versions=None, timestamp=None, include_timestamp=False):
         if not isinstance(row, bytes):
             row = row.encode('utf-8')
         if not isinstance(column, bytes):
             column = column.encode('utf-8')
         result = []
-        timestamps = sorted(self._data.get(row, {}).get(column, {}).keys(),
-                            reverse=True)
+        timestamps = sorted(self._data.get(row, {}).get(column, {}).keys(), reverse=True)
         for ts in timestamps:
             value = self._data[row][column][ts]
             if timestamp is None or ts < timestamp:
@@ -124,22 +124,29 @@ class Table(object):
         return result
 
     @_check_table_existence
-    def scan(self, row_start=None, row_stop=None, row_prefix=None,
-             columns=None, timestamp=None, include_timestamp=False,
-             batch_size=1000, scan_batching=None, limit=None,
-             reverse=False, sorted_columns=False, **kwargs):
+    def scan(self,
+             row_start=None,
+             row_stop=None,
+             row_prefix=None,
+             columns=None,
+             timestamp=None,
+             include_timestamp=False,
+             batch_size=1000,
+             scan_batching=None,
+             limit=None,
+             reverse=False,
+             sorted_columns=False,
+             **kwargs):
         # encode columns key and data (for python3 compatibility)
         if columns:
-          for i, col in enumerate(columns):
-            if not isinstance(col, bytes):
-                columns[i] = col.encode('utf-8')
+            for i, col in enumerate(columns):
+                if not isinstance(col, bytes):
+                    columns[i] = col.encode('utf-8')
         if row_prefix is not None:
             if not isinstance(row_prefix, bytes):
                 row_prefix = row_prefix.encode('utf-8')
             if row_start is not None or row_stop is not None:
-                raise TypeError(
-                    "'row_prefix' cannot be combined with 'row_start' "
-                    "or 'row_stop'")
+                raise TypeError("'row_prefix' cannot be combined with 'row_start' " "or 'row_stop'")
 
             row_start = row_prefix
             row_stop = _str_increment(row_prefix)
@@ -156,15 +163,12 @@ class Table(object):
                 row_stop = row_stop.encode('utf-8')
             rows = filter(lambda k: k < row_stop, rows)
 
-        result = sorted([
-            (row, self.row(row, columns, timestamp, include_timestamp))
-            for row in rows
-        ], reverse=reverse)
+        result = sorted([(row, self.row(row, columns, timestamp, include_timestamp)) for row in rows], reverse=reverse)
 
         if limit:
             if len(result) < limit:
                 result = result[:limit]
-        
+
         return iter(result)
 
     @_check_table_existence
@@ -172,11 +176,8 @@ class Table(object):
         # encode row key and data before put (for python3 compatibility)
         if not isinstance(row, bytes):
             row = row.encode('utf-8')
-        data = {
-            (k if isinstance(k, bytes) else k.encode('utf-8')):
-            (v if isinstance(v, bytes) else v.encode('utf-8'))
-            for k, v in iteritems(data)
-        }
+        data = {(k if isinstance(k, bytes) else k.encode('utf-8')): (v if isinstance(v, bytes) else v.encode('utf-8'))
+                for k, v in iteritems(data)}
 
         # Check data against column families
         for colname in data:
@@ -212,11 +213,7 @@ class Table(object):
         if not isinstance(row, bytes):
             row = row.encode('utf-8')
         if columns:
-            columns = [
-                column if isinstance(column, bytes)
-                else column.encode('utf-8')
-                for column in columns
-            ]
+            columns = [column if isinstance(column, bytes) else column.encode('utf-8') for column in columns]
         if not columns and timestamp is None:
             # Delete whole row
             self._data.pop(row, None)
@@ -241,13 +238,12 @@ class Table(object):
                     # Delete a column if it doesn't have any timestamps
                     del data[colname]
 
-    def batch(self, timestamp=None, batch_size=None, transaction=False,
-              wal=True):
+    def batch(self, timestamp=None, batch_size=None, transaction=False, wal=True):
         return Batch(self, timestamp, batch_size, transaction, wal)
 
     def counter_get(self, row, column):
         # Decode as long integer, big endian
-        value = self.row(row, (column,)).get(column)
+        value = self.row(row, (column, )).get(column)
         if not value:
             return 0
         return struct.unpack('>q', value)[0]
@@ -256,7 +252,7 @@ class Table(object):
     def counter_set(self, row, column, value=0):
         # Encode as long integer, big endian
         value = struct.pack('>q', value)
-        self.delete(row, (column,))
+        self.delete(row, (column, ))
         self.put(row, {column: value})
 
     @_check_table_existence
